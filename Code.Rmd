@@ -1,0 +1,187 @@
+---
+title: "PRACTICAL MACHINE LEARNING COURSE PROJECT"
+author: 
+date: 
+output: html_document
+---
+
+#### Clear Workspace
+```{r}
+# Clear All Global Environiment Objects
+rm(list = ls())
+# Turn off warnings
+options(warn=-1)
+```
+
+
+We start by loading the desired packages.
+
+### Load packages
+```{r, message=FALSE}
+library(ggplot2)
+library(dplyr)
+library(caret)
+```
+
+The first step is to import the data.
+
+### Load Data
+```{r}
+## Read Data
+df_training= read.csv("pml-training.csv")
+df_testing= read.csv("pml-testing.csv")
+```
+
+Next we check for training and testing data consistency, i.e. check if schema of both the training and testing sets are identical. 
+
+```{r}
+colnames_train <- colnames(df_training)
+colnames_test <- colnames(df_testing)
+
+# Verify that the column names (excluding classe and problem_id) are identical in the training and test set.
+all.equal(colnames_train[1:length(colnames_train)-1], colnames_test[1:length(colnames_train)-1])
+```
+
+Hence we confirm that the schema is identical.
+
+Next we eliminate features with NAs
+```{r}
+# Count the number of non-NAs in each col.
+nonNAs <- function(x) {
+    as.vector(apply(x, 2, function(x) length(which(!is.na(x)))))
+}
+
+# Build vector of missing data or NA columns to drop.
+colcnts <- nonNAs(df_training)
+drops <- c()
+for (cnt in 1:length(colcnts)) {
+    if (colcnts[cnt] < nrow(df_training)) {
+        drops <- c(drops, colnames_train[cnt])  # names of columns to drop
+    }
+}
+
+
+
+# Drop NA data and the first 7 columns as they're unnecessary for predicting.
+df_training <- df_training[,!(names(df_training) %in% drops)]
+df_training <- df_training[,8:length(colnames(df_training))]
+
+df_testing <- df_testing[,!(names(df_testing) %in% drops)]
+df_testing <- df_testing[,8:length(colnames(df_testing))]
+
+# Show remaining columns.
+colnames(df_training)
+colnames(df_testing)
+
+```
+
+Need we check if there are any near zero varaiance predictors and eliminate them
+
+```{r}
+
+nsv <- nearZeroVar(df_training, saveMetrics=TRUE)
+nsv
+nsv <- nearZeroVar(df_training)
+
+if (length(nsv)>0){
+
+df_training <- df_training[, -nsv]
+df_testing <- df_testing[, -nsv]
+
+
+}
+
+```
+
+
+Now we fit a classification model.
+
+We start by fitting a decision tree based model. Training is done with preprocessing (centering and scaling) and 5-cross validation.
+
+Even though we have been provided with a test set of 20 samples, we first divide the training dataset into a train and test data set in the proportion 75:25.
+
+Next we train the model
+
+CARET PACKAGE - CART - Classification and Decision Tree
+```{r}
+set.seed(333)
+# create training set indexes with 75% of data
+inTrain <- createDataPartition(y=df_training$classe,p=0.75, list=FALSE)
+#  training set
+training <- df_training[inTrain,]
+# testing set
+testing <- df_training[-inTrain,]
+
+
+# dimension of original and training dataset & training dataset
+rbind("original dataset" = dim(df_training),"training set" = dim(training),"testing set" = dim(testing))
+
+set.seed(333)
+# Train on training  with both preprocessing and cross validation.
+modFit <- train(classe ~ .,  preProcess=c("center", "scale"), trControl=trainControl(method = "cv", number = 5), data = training, method="rpart")
+print(modFit, digits=3)
+
+library(rattle)
+library(rpart.plot)
+fancyRpartPlot(modFit$finalModel)
+```
+
+Accuracy of the trained model is checked on the 25% test set.
+
+Prediction
+```{r}
+pred <- predict(modFit,testing)
+cfMatrix <- confusionMatrix(data = pred,testing$classe)
+print(cfMatrix, digits = 4)
+
+```
+
+Model accuracy is found to be  50.18%, which is unsatifactory.
+
+Next we try a more advanced classification algorithm based on random forests.
+
+CARET PACKAGE - Random Forest
+```{r}
+set.seed(333)
+modFit_rf <- train(classe ~ ., method="rf", preProcess=c("center", "scale"), trControl=trainControl(method = "cv", number = 5), data=training)
+print(modFit_rf, digits=3)
+
+```
+
+Varimp plot
+```{r}
+print(modFit_rf, digits = 4)
+print(modFit_rf$finalModel)
+varImpPlot(modFit_rf$finalModel)
+
+plot(varImp(modFit_rf))
+```
+
+Prediction
+```{r}
+modFit_rf
+
+pred_rf <- predict(modFit_rf,testing)
+cfMatrix <- confusionMatrix(data = pred_rf,testing$classe)
+print(cfMatrix, digits = 4)
+
+confusionMatrix(data = pred_rf,testing$classe)$overall[1]
+
+```
+
+Model accuracy is found to be  99.83%, which is very satifactory!
+
+Out of Sample Error based on Random Forest (preprocessing and cross validation) testing set is: 1 - .9983 = 0.0017.
+
+
+Ultimately, the prediction model was run on the test data to predict the outcome of 20 different test cases.
+
+```{r}
+print(predict(modFit_rf, newdata=df_testing))
+
+```
+
+Conclusion:
+
+Random forest demonstrated much better prediction accuracy than decision tress.
+Accuracy Rate 0.0017 Predictions: B A B A A E D B A A B C B A E E A B B B
